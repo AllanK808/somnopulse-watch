@@ -30,6 +30,13 @@ jobs:
         mkdir -p app/src/main/java/com/somnopulse/watch
         mkdir -p app/src/main/res/values
 
+        # gradle.properties (Enforce AndroidX)
+        cat << 'PROPS' > gradle.properties
+        android.useAndroidX=true
+        android.nonTransitiveRClass=true
+        org.gradle.jvmargs=-Xmx2048m
+        PROPS
+
         cat << 'GRADLE_SETTINGS' > settings.gradle.kts
         pluginManagement {
             repositories {
@@ -85,8 +92,7 @@ jobs:
             }
         }
         dependencies {
-            implementation("androidx.core:core-ktx:1.12.0")
-            implementation("com.google.android.gms:play-services-wearable:18.1.0")
+            implementation("androidx.core:core:1.12.0")
         }
         APP_GRADLE
 
@@ -337,7 +343,7 @@ jobs:
 
     - name: Compile Wear OS APK
       run: |
-        gradle assembleDebug --no-daemon
+        gradle assembleDebug --no-daemon --stacktrace
 
     - name: Package & Export SomnoPulse APK
       run: |
