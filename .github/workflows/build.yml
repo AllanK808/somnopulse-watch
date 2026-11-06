@@ -30,7 +30,6 @@ jobs:
         mkdir -p app/src/main/java/com/somnopulse/watch
         mkdir -p app/src/main/res/values
 
-        # gradle.properties (Enforce AndroidX)
         cat << 'PROPS' > gradle.properties
         android.useAndroidX=true
         android.nonTransitiveRClass=true
@@ -75,8 +74,8 @@ jobs:
                 applicationId = "com.somnopulse.watch"
                 minSdk = 28
                 targetSdk = 34
-                versionCode = 1
-                versionName = "1.0"
+                versionCode = 3
+                versionName = "3.0"
             }
             buildTypes {
                 release {
@@ -140,10 +139,15 @@ jobs:
         package com.somnopulse.watch
         import android.Manifest
         import android.app.Activity
+        import android.content.Context
         import android.content.Intent
         import android.content.pm.PackageManager
+        import android.graphics.Color
         import android.os.Bundle
+        import android.view.Gravity
         import android.widget.Button
+        import android.widget.LinearLayout
+        import android.widget.ScrollView
         import android.widget.TextView
         import androidx.core.app.ActivityCompat
         import androidx.core.content.ContextCompat
@@ -151,32 +155,91 @@ jobs:
         class MainActivity : Activity() {
             private lateinit var statusText: TextView
             private lateinit var toggleButton: Button
+            private lateinit var sensButton: Button
+            private lateinit var testPulseButton: Button
             private var isMonitoring = false
+            private var testLevel = 1
 
             override fun onCreate(savedInstanceState: Bundle?) {
                 super.onCreate(savedInstanceState)
-                val layout = android.widget.LinearLayout(this).apply {
-                    orientation = android.widget.LinearLayout.VERTICAL
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(32, 32, 32, 32)
-                    setBackgroundColor(android.graphics.Color.BLACK)
+                val prefs = getSharedPreferences("somno_prefs", Context.MODE_PRIVATE)
+
+                val scrollView = ScrollView(this).apply {
+                    setBackgroundColor(Color.BLACK)
                 }
+
+                val layout = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(24, 24, 24, 48)
+                }
+
                 statusText = TextView(this).apply {
-                    text = "SomnoPulse Ready"
-                    setTextColor(android.graphics.Color.WHITE)
-                    textSize = 14f
-                    gravity = android.view.Gravity.CENTER
-                    setPadding(0, 0, 0, 16)
+                    text = "SomnoPulse Auto-Ladder"
+                    setTextColor(Color.WHITE)
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(0, 0, 0, 6)
                 }
+
+                val infoBadge = TextView(this).apply {
+                    text = "Auto-Escalates: Lvl 1 -> 4 until turned"
+                    setTextColor(Color.parseColor("#38BDF8"))
+                    textSize = 10f
+                    gravity = Gravity.CENTER
+                    setPadding(0, 0, 0, 10)
+                }
+
                 toggleButton = Button(this).apply {
                     text = "Start Sleep Guard"
+                    setBackgroundColor(Color.parseColor("#1E3A8A"))
+                    setTextColor(Color.WHITE)
                     setOnClickListener {
                         if (isMonitoring) stopService() else checkPermissionsAndStart()
                     }
                 }
+
+                var currentSens = prefs.getInt("sensitivity_level", 1)
+                sensButton = Button(this).apply {
+                    val label = when(currentSens) {
+                        0 -> "Sensitivity: High (39dB)"
+                        2 -> "Sensitivity: Normal (46dB)"
+                        else -> "Sensitivity: Increased (42dB)"
+                    }
+                    text = label
+                    setBackgroundColor(Color.parseColor("#1F2937"))
+                    setTextColor(Color.parseColor("#FBBF24"))
+                    setOnClickListener {
+                        currentSens = (currentSens + 1) % 3
+                        val newLabel = when(currentSens) {
+                            0 -> "Sensitivity: High (39dB)"
+                            2 -> "Sensitivity: Normal (46dB)"
+                            else -> "Sensitivity: Increased (42dB)"
+                        }
+                        text = newLabel
+                        prefs.edit().putInt("sensitivity_level", currentSens).apply()
+                    }
+                }
+
+                testPulseButton = Button(this).apply {
+                    text = "Test Pulse (Lvl 1)"
+                    setBackgroundColor(Color.parseColor("#374151"))
+                    setTextColor(Color.WHITE)
+                    setOnClickListener {
+                        GalaxyWatchUltraHelper.performUltraHapticPulse(this@MainActivity, testLevel)
+                        testLevel = if (testLevel >= 4) 1 else testLevel + 1
+                        text = "Test Pulse (Lvl $testLevel)"
+                    }
+                }
+
                 layout.addView(statusText)
+                layout.addView(infoBadge)
                 layout.addView(toggleButton)
-                setContentView(layout)
+                layout.addView(sensButton)
+                layout.addView(testPulseButton)
+
+                scrollView.addView(layout)
+                setContentView(scrollView)
             }
 
             private fun checkPermissionsAndStart() {
@@ -192,8 +255,9 @@ jobs:
                 ContextCompat.startForegroundService(this, intent)
                 isMonitoring = true
                 statusText.text = "Guard Active (Listening)"
-                statusText.setTextColor(android.graphics.Color.parseColor("#38BDF8"))
+                statusText.setTextColor(Color.parseColor("#38BDF8"))
                 toggleButton.text = "Stop Sleep Guard"
+                toggleButton.setBackgroundColor(Color.parseColor("#991B1B"))
             }
 
             private fun stopService() {
@@ -201,8 +265,9 @@ jobs:
                 stopService(intent)
                 isMonitoring = false
                 statusText.text = "Guard Stopped"
-                statusText.setTextColor(android.graphics.Color.WHITE)
+                statusText.setTextColor(Color.WHITE)
                 toggleButton.text = "Start Sleep Guard"
+                toggleButton.setBackgroundColor(Color.parseColor("#1E3A8A"))
             }
         }
         MAIN_KT
@@ -225,13 +290,23 @@ jobs:
                     context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val timings = longArrayOf(0, 200, 120, 200)
-                    val amplitudes = intArrayOf(0, 110, 0, 160)
+                    val timings = when (escalationLevel) {
+                        1 -> longArrayOf(0, 180, 140, 180)
+                        2 -> longArrayOf(0, 260, 100, 260, 100, 300)
+                        3 -> longArrayOf(0, 320, 80, 320, 80, 350, 80, 420)
+                        else -> longArrayOf(0, 420, 70, 420, 70, 450, 70, 520)
+                    }
+                    val amplitudes = when (escalationLevel) {
+                        1 -> intArrayOf(0, 130, 0, 170)
+                        2 -> intArrayOf(0, 190, 0, 220, 0, 240)
+                        3 -> intArrayOf(0, 230, 0, 245, 0, 255, 0, 255)
+                        else -> intArrayOf(0, 255, 0, 255, 0, 255, 0, 255)
+                    }
                     val effect = VibrationEffect.createWaveform(timings, amplitudes, -1)
                     vibrator.vibrate(effect)
                 } else {
                     @Suppress("DEPRECATION")
-                    vibrator.vibrate(longArrayOf(0, 200, 120, 200), -1)
+                    vibrator.vibrate(longArrayOf(0, 300, 100, 300), -1)
                 }
             }
         }
@@ -249,6 +324,7 @@ jobs:
         import androidx.core.app.NotificationCompat
         import java.util.*
         import kotlin.math.log10
+        import kotlin.math.min
         import kotlin.math.sqrt
 
         class SnoreDetectorService : Service() {
@@ -257,9 +333,11 @@ jobs:
             private var wakeLock: PowerManager.WakeLock? = null
             private val sleepStartHour = 22
             private val sleepEndHour = 7
-            private val snoreDbThreshold = 48.0
+
+            private var escalationLevel = 1
             private var lastPulseTimestamp: Long = 0
-            private val gracePeriodMs: Long = 20_000
+            private val gracePeriodMs: Long = 18_000
+            private var quietStartTime: Long = 0
 
             override fun onCreate() {
                 super.onCreate()
@@ -272,6 +350,7 @@ jobs:
             override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                 if (!isRunning) {
                     isRunning = true
+                    escalationLevel = 1
                     startAcousticSnoreDetection()
                 }
                 return START_STICKY
@@ -288,6 +367,7 @@ jobs:
             }
 
             private fun startAcousticSnoreDetection() {
+                val prefs = getSharedPreferences("somno_prefs", Context.MODE_PRIVATE)
                 Thread {
                     val sampleRate = 16000
                     val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -295,6 +375,7 @@ jobs:
                         audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
                         audioRecord?.startRecording()
                         val audioBuffer = ShortArray(bufferSize)
+
                         while (isRunning) {
                             val readSize = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
                             if (readSize > 0) {
@@ -302,10 +383,32 @@ jobs:
                                 for (i in 0 until readSize) { sum += audioBuffer[i] * audioBuffer[i] }
                                 val rms = sqrt(sum / readSize)
                                 val db = if (rms > 0) 20 * log10(rms) else 0.0
+
+                                val sensSetting = prefs.getInt("sensitivity_level", 1)
+                                val threshold = when(sensSetting) {
+                                    0 -> 39.0
+                                    2 -> 46.0
+                                    else -> 42.0
+                                }
+
                                 val now = System.currentTimeMillis()
-                                if (db >= snoreDbThreshold && isWithinSleepHours() && (now - lastPulseTimestamp > gracePeriodMs)) {
-                                    GalaxyWatchUltraHelper.performUltraHapticPulse(this, 1)
-                                    lastPulseTimestamp = now
+
+                                if (db >= threshold && isWithinSleepHours()) {
+                                    quietStartTime = 0
+
+                                    if (now - lastPulseTimestamp > gracePeriodMs) {
+                                        GalaxyWatchUltraHelper.performUltraHapticPulse(this, escalationLevel)
+                                        lastPulseTimestamp = now
+                                        escalationLevel = min(escalationLevel + 1, 4)
+                                    }
+                                } else {
+                                    if (quietStartTime == 0L) {
+                                        quietStartTime = now
+                                    } else if (now - quietStartTime > 16_000L) {
+                                        if (escalationLevel > 1) {
+                                            escalationLevel = 1
+                                        }
+                                    }
                                 }
                             }
                             Thread.sleep(100)
@@ -323,7 +426,7 @@ jobs:
                 }
                 return NotificationCompat.Builder(this, channelId)
                     .setContentTitle("SomnoPulse Active")
-                    .setContentText("Monitoring for snoring during sleep hours")
+                    .setContentText("Auto-escalating smart haptics active")
                     .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                     .setOngoing(true)
                     .build()
